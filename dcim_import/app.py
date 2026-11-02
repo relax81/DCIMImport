@@ -4,8 +4,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QLibraryInfo, QPointF, QProcess, QSettings, Qt, QTranslator
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QLibraryInfo, QProcess, QSettings, Qt, QTranslator
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMainWindow, QMenu, QMessageBox, QSystemTrayIcon,
@@ -32,35 +32,20 @@ def set_language_preview(code: str) -> str:
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
+def resource_path(*parts: str) -> Path:
+    """Datei aus dem Projekt bzw. – in der gebauten EXE – aus dem PyInstaller-Bundle."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    return base.joinpath(*parts)
+
+
 def app_icon() -> QIcon:
-    icon = QIcon()
-    for size in (16, 24, 32, 48, 64, 128, 256):
-        pm = QPixmap(size, size)
-        pm.fill(Qt.transparent)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setBrush(QColor("#1f3b5c"))
-        p.setPen(Qt.NoPen)
-        p.drawRoundedRect(0, 0, size, size, size * 0.22, size * 0.22)
-        # Kamera-Objektiv
-        p.setBrush(QColor("#e8eef5"))
-        r = size * 0.30
-        p.drawEllipse(size / 2 - r, size / 2 - r * 0.85, 2 * r, 2 * r)
-        p.setBrush(QColor("#1f3b5c"))
-        r2 = r * 0.55
-        p.drawEllipse(size / 2 - r2, size / 2 - r * 0.85 + (r - r2), 2 * r2, 2 * r2)
-        # Pfeil nach unten (Import)
-        p.setBrush(QColor("#f2a900"))
-        w = size * 0.18
-        y = size * 0.80
-        p.drawPolygon([
-            QPointF(size / 2 - w, y - w * 0.6),
-            QPointF(size / 2 + w, y - w * 0.6),
-            QPointF(size / 2, y + w * 0.5),
-        ])
-        p.end()
-        icon.addPixmap(pm)
-    return icon
+    for name in ("icon.ico", "icon-256.png"):
+        path = resource_path("assets", name)
+        if path.is_file():
+            icon = QIcon(str(path))
+            if not icon.isNull():
+                return icon
+    return QIcon()
 
 
 # ---------------------------------------------------------------- Autostart (Windows)

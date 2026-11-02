@@ -1,3 +1,5 @@
+<img src="assets/icon.svg" width="96" alt="" align="right">
+
 # DCIM Import
 
 **English** · [Deutsch](README.de.md)
