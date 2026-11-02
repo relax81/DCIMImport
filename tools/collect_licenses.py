@@ -17,6 +17,9 @@ def main(dest: Path) -> int:
             continue
         for f in dist.files or []:
             name = Path(str(f)).name.upper()
+            # PySide6-Wheels enthalten auch den Qt-Commercial-Lizenztext -> nicht beilegen
+            if "COMMERCIAL" in name:
+                continue
             if any(k in name for k in ("LICENSE", "LICENCE", "COPYING", "NOTICE")):
                 src = Path(dist.locate_file(f))
                 if src.is_file():
