@@ -19,6 +19,37 @@ from .workers import ImportWorker, ScanWorker
 DEFAULT_TARGET = str(Path.home() / "Desktop" / "import")
 
 
+class ElidedLabel(QLabel):
+    """Einzeilige Anzeige, die zu lange Texte in der Mitte mit „…“ kürzt.
+
+    Ändert ihre Höhe nie (kein Umbruch) und macht das Fenster nicht breiter;
+    der volle Text steht im Tooltip."""
+
+    def __init__(self, text: str = ""):
+        super().__init__()
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumWidth(40)
+        self.setFullText(text)
+
+    def setFullText(self, text: str):
+        self._full = text
+        self.setToolTip(text)
+        self._elide()
+
+    def fullText(self) -> str:
+        return self._full
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._elide()
+
+    def _elide(self):
+        shown = self.fontMetrics().elidedText(self._full, Qt.ElideMiddle, max(10, self.width()))
+        if shown != self.text():
+            self.setText(shown)
+
+
 def muted(label: QLabel):
     """Dezente Schrift, die im hellen und dunklen Modus lesbar bleibt."""
     pal = label.palette()
@@ -43,6 +74,8 @@ class ImportTab(QWidget):
         self.card_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.card_status = QLabel(tr("Suche Karte …"))
         self.card_status.setWordWrap(True)
+        self.card_status.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.card_status.setMinimumHeight(2 * self.card_status.fontMetrics().lineSpacing() + 4)
         self.card_status.setTextFormat(Qt.RichText)
         btn_rescan = QPushButton(tr("Neu suchen  [F5]"))
         btn_rescan.clicked.connect(lambda: self.poll_cards(force=True))
@@ -71,9 +104,8 @@ class ImportTab(QWidget):
         trow.addWidget(btn_browse)
         self.suffix = QLineEdit()
         self.suffix.setPlaceholderText(tr("optional, z. B. Headphone Stand"))
-        self.dest_preview = QLabel()
+        self.dest_preview = ElidedLabel()
         muted(self.dest_preview)
-        self.dest_preview.setWordWrap(True)
         g_target = QGroupBox(tr("Ziel"))
         f = QFormLayout(g_target)
         f.addRow(tr("Hauptordner"), trow)
@@ -152,6 +184,11 @@ class ImportTab(QWidget):
         QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self.cancel)
         QShortcut(QKeySequence(Qt.Key_F5), self, activated=lambda: self.poll_cards(force=True))
 
+        # Neu-Scan nach Optionsänderung erst, wenn eine Weile nichts getippt wurde
+        self._rescan_timer = QTimer(self)
+        self._rescan_timer.setSingleShot(True)
+        self._rescan_timer.timeout.connect(lambda: self.request_scan(quiet=True))
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll_cards)
         self.timer.start(2000)
@@ -180,7 +217,7 @@ class ImportTab(QWidget):
     def options_changed(self):
         self.s.setValue("target", self.target.text().strip())
         self.update_preview()
-        self.request_scan(delay=600)
+        self._rescan_timer.start(700)  # startet bei jeder Eingabe neu
 
     def update_preview(self):
         opt = self.options()
@@ -188,7 +225,7 @@ class ImportTab(QWidget):
             name = core.folder_name(tr("JJJJ-MM-TT"), opt.suffix) + tr("  (je Aufnahmetag)")
         else:
             name = core.folder_name(datetime.now().strftime("%Y-%m-%d"), opt.suffix)
-        self.dest_preview.setText(f"→ {opt.target_root / name}")
+        self.dest_preview.setFullText(f"→ {opt.target_root / name}")
 
     # ------------------------------------------------------------ Karte
 
@@ -226,13 +263,20 @@ class ImportTab(QWidget):
         else:
             self.request_scan()
 
-    def request_scan(self, delay: int = 0):
+    def request_scan(self, quiet: bool = False):
+        """Karteninhalt neu auswerten.
+
+        quiet=True (nach Optionsänderung): die bisherige Zusammenfassung bleibt stehen,
+        damit sich das Layout beim Tippen nicht verschiebt."""
         card = self.current_card()
         if not card:
             return
-        self.card_status.setText(tr("Prüfe Karteninhalt …"))
+        if not (quiet and self._summary):
+            self.card_status.setText(tr("Prüfe Karteninhalt …"))
+        if self._scan_pending:
+            return  # ist schon eingeplant
         self._scan_pending = True
-        QTimer.singleShot(delay, self._do_scan)
+        QTimer.singleShot(0, self._do_scan)
 
     def _do_scan(self):
         if not self._scan_pending:
@@ -278,7 +322,8 @@ class ImportTab(QWidget):
                     + tr("Schon importiert: {items}", items=items) + "</span>")
             self.o_skip.setText(tr("Schon importierte überspringen ({n} Dateien)", n=n_already))
         self.o_skip.setVisible(bool(n_already))
-        self.card_status.setText(txt)
+        if self.card_status.text() != txt:
+            self.card_status.setText(txt)
         self.btn_start.setEnabled(True)
         self._update_start_text()
 
