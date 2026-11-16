@@ -153,12 +153,12 @@ EN: dict[str, str] = {
     "Großansicht   [Leertaste]": "Large view   [Space]",
     "Markierte in Papierkorb   [Strg+Entf]": "Marked to Recycle Bin   [Ctrl+Del]",
     "Alle Markierungen aufheben": "Clear all marks",
-    "Tasten: Pfeile wählen · Entf / X markieren · Leertaste / Enter / Doppelklick Großansicht · "
-    "Strg+A alle auswählen · Strg+Entf löschen. "
-    "Gelöscht wird erst mit „In Papierkorb“ – JPG und RAW zusammen.":
-        "Keys: arrows select · Del / X mark · Space / Enter / double-click large view · "
-        "Ctrl+A select all · Ctrl+Del delete. "
-        "Nothing is deleted until “to Recycle Bin” – JPG and RAW together.",
+    "Tasten: Pfeile wählen · Entf / X markieren · M in Ordner verschieben · "
+    "Leertaste / Enter / Doppelklick Großansicht · Strg+A alle auswählen · "
+    "Strg+Entf löschen. Gelöscht wird erst mit „In Papierkorb“ – JPG und RAW zusammen.":
+        "Keys: arrows select · Del / X mark · M move to folder · "
+        "Space / Enter / double-click large view · Ctrl+A select all · "
+        "Ctrl+Del delete. Nothing is deleted until “to Recycle Bin” – JPG and RAW together.",
     "Ordner zum Aussortieren": "Folder to review",
     "Markierungen verwerfen?": "Discard marks?",
     "{n} Bilder sind markiert, aber noch nicht gelöscht. Trotzdem wechseln?":
@@ -173,6 +173,27 @@ EN: dict[str, str] = {
     "{n} RAW-Dateien haben kein JPG mehr. In den Papierkorb verschieben?":
         "{n} RAW files no longer have a JPG. Move them to the Recycle Bin?",
     "Nicht alles gelöscht": "Not everything was deleted",
+
+    # ---------- Themenordner
+    "Ungültiger Ordnername: „{name}“": "Invalid folder name: “{name}”",
+    "In Ordner verschieben": "Move to folder",
+    "{n} Bilder": "{n} images",
+    "{what} in einen Unterordner von „{folder}“ verschieben:":
+        "Move {what} into a subfolder of “{folder}”:",
+    "Ordnername, z. B. Strand": "Folder name, e.g. Beach",
+    "Verschieben": "Move",
+    "Neuen Namen eingeben oder vorhandenen Ordner wählen. Darin werden wieder jpg und raw angelegt.":
+        "Enter a new name or pick an existing folder. It gets its own jpg and raw folders.",
+    "Dieser Name ist nicht möglich.": "This name is not allowed.",
+    "Ordner „{name}“ existiert – Bilder kommen dazu.":
+        "Folder “{name}” exists – the images will be added.",
+    "Neuer Ordner: {path}": "New folder: {path}",
+    "In Ordner verschieben …   [M]": "Move to folder …   [M]",
+    "Ausgewählte Bilder samt RAW in einen Themen-Unterordner verschieben":
+        "Move the selected images and their RAWs into a topic subfolder",
+    "Nicht alles verschoben": "Not everything was moved",
+    "✔ {n} Bilder nach „{name}“ verschoben": "✔ {n} images moved to “{name}”",
+    " ({n} wegen gleichem Namen umbenannt)": " ({n} renamed because of duplicate names)",
 
     # ---------- Einstellungen
     "<b>Sprache</b>": "<b>Language</b>",

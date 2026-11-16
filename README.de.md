@@ -57,10 +57,30 @@ Bereits importierte Dateien können per Haken übersprungen werden.
 | Pfeiltasten | Bild wählen |
 | `Entf` / `X` | markieren / Markierung aufheben |
 | `Leertaste` / `Enter` / Doppelklick | Großansicht (`← →` blättern, `F` Vollbild, `Esc` zurück) |
+| `M` | Ausgewählte Bilder (JPG + RAW) in einen Themen-Unterordner verschieben |
 | `Strg+A` | alle auswählen |
 | `Strg+Entf` | Markierte in den Papierkorb (JPG + zugehöriges RAW) |
 
 **RAW ohne JPG entfernen** räumt Ordner auf, in denen JPGs schon anderweitig gelöscht wurden.
+
+### Themenordner
+
+Bilder auswählen, `M` drücken (oder *In Ordner verschieben …*) und einen neuen Namen eingeben
+oder einen vorhandenen Ordner wählen. JPGs und zugehörige RAWs werden gemeinsam in einen
+Unterordner des Importordners verschoben, der wieder eigene `jpg`- / `raw`-Ordner und ein
+eigenes Aufräum-Script bekommt:
+
+```
+2026-11-16 Urlaub\
+├─ jpg\  raw\
+└─ Strand\
+   ├─ jpg\  raw\
+   └─ RAW_ohne_JPG_loeschen.bat
+```
+
+Themenordner stehen eingerückt in der Ordnerliste und lassen sich wie jeder Importordner
+aussortieren. Es wird nie etwas überschrieben: Bei gleichem Namen bekommen JPG und RAW
+gemeinsam die Endung `_1`.
 
 ### Aufräum-Script
 

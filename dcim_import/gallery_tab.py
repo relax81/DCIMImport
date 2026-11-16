@@ -6,8 +6,9 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
+    QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSizePolicy, QSlider, QVBoxLayout,
+    QWidget,
 )
 
 from . import core
@@ -15,6 +16,24 @@ from .i18n import tr
 from .workers import ThumbWorker, load_scaled
 
 ROLE_INDEX = Qt.UserRole + 1
+
+
+def _inside(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _top_of(path: Path, root: Path | None) -> Path:
+    """Oberster Ordner unterhalb des Hauptordners (für Themenordner), sonst der Ordner selbst."""
+    if root:
+        try:
+            return root / path.relative_to(root).parts[0]
+        except (ValueError, IndexError):
+            pass
+    return path
 
 
 def mark_overlay(img: QImage, marked: bool, has_raw: bool, box: int) -> QPixmap:
@@ -47,6 +66,57 @@ def mark_overlay(img: QImage, marked: bool, has_raw: bool, box: int) -> QPixmap:
         p.drawText(r, Qt.AlignCenter, "RAW")
     p.end()
     return pm
+
+
+class TopicDialog(QDialog):
+    """Fragt den Namen des Themenordners ab (neu oder vorhanden)."""
+
+    def __init__(self, parent: QWidget, folder: Path, n_images: int, n_raw: int):
+        super().__init__(parent)
+        self.setWindowTitle(tr("In Ordner verschieben"))
+        self.folder = folder
+        what = tr("{n} Bilder", n=n_images) + (tr(" (+ {n} RAW)", n=n_raw) if n_raw else "")
+        intro = QLabel(tr("{what} in einen Unterordner von „{folder}“ verschieben:",
+                          what=what, folder=folder.name))
+        intro.setWordWrap(True)
+        self.combo = QComboBox()
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QComboBox.NoInsert)
+        self.combo.addItems(core.topics_in(folder))
+        self.combo.setCurrentIndex(-1)
+        self.combo.lineEdit().setPlaceholderText(tr("Ordnername, z. B. Strand"))
+        self.combo.setMinimumWidth(320)
+        self.hint = QLabel()
+        self.hint.setWordWrap(True)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.button(QDialogButtonBox.Ok).setText(tr("Verschieben"))
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.combo.editTextChanged.connect(self._check)
+        lay = QVBoxLayout(self)
+        lay.addWidget(intro)
+        lay.addWidget(self.combo)
+        lay.addWidget(self.hint)
+        lay.addWidget(self.buttons)
+        self._check("")
+        self.combo.setFocus()
+
+    def topic(self) -> str:
+        return core.clean_topic_name(self.combo.currentText())
+
+    def _check(self, text: str):
+        name = core.clean_topic_name(text)
+        ok = bool(name)
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(ok)
+        if not text.strip():
+            self.hint.setText(tr("Neuen Namen eingeben oder vorhandenen Ordner wählen. "
+                                 "Darin werden wieder jpg und raw angelegt."))
+        elif not ok:
+            self.hint.setText(tr("Dieser Name ist nicht möglich."))
+        elif (self.folder / name).is_dir():
+            self.hint.setText(tr("Ordner „{name}“ existiert – Bilder kommen dazu.", name=name))
+        else:
+            self.hint.setText(tr("Neuer Ordner: {path}", path=str(self.folder / name)))
 
 
 class Viewer(QDialog):
@@ -131,6 +201,7 @@ class GalleryTab(QWidget):
         self.marked: set[Path] = set()
         self.loader: ThumbWorker | None = None
         self.box = int(self.s.value("thumb", 180))
+        self._target_root: Path | None = None
 
         # ---------- Kopfzeile
         self.folder_combo = QComboBox()
@@ -178,6 +249,7 @@ class GalleryTab(QWidget):
         QShortcut(QKeySequence(Qt.Key_Return), self.list,
                   activated=lambda: self.open_viewer(self.list.currentRow()))
         QShortcut(QKeySequence("Ctrl+Delete"), self, activated=self.trash_marked)
+        QShortcut(QKeySequence(Qt.Key_M), self.list, activated=self.move_selected)
         QShortcut(QKeySequence(Qt.Key_Space), self.list,
                   activated=lambda: self.open_viewer(self.list.currentRow()))
 
@@ -185,6 +257,10 @@ class GalleryTab(QWidget):
         self.info = QLabel()
         self.btn_mark = QPushButton(tr("Markieren   [Entf / X]"))
         self.btn_mark.clicked.connect(self.toggle_selected)
+        self.btn_move = QPushButton(tr("In Ordner verschieben …   [M]"))
+        self.btn_move.setToolTip(tr("Ausgewählte Bilder samt RAW in einen Themen-Unterordner "
+                                    "verschieben"))
+        self.btn_move.clicked.connect(self.move_selected)
         self.btn_view = QPushButton(tr("Großansicht   [Leertaste]"))
         self.btn_view.clicked.connect(lambda: self.open_viewer(self.list.currentRow()))
         self.btn_trash = QPushButton(tr("Markierte in Papierkorb   [Strg+Entf]"))
@@ -194,17 +270,26 @@ class GalleryTab(QWidget):
         self.btn_unmark.clicked.connect(self.clear_marks)
         self.btn_orphans = QPushButton()
         self.btn_orphans.clicked.connect(self.trash_orphans)
-        foot = QHBoxLayout()
-        foot.addWidget(self.info, 1)
-        foot.addWidget(self.btn_view)
-        foot.addWidget(self.btn_mark)
-        foot.addWidget(self.btn_orphans)
-        foot.addWidget(self.btn_unmark)
-        foot.addWidget(self.btn_trash)
+        # Infozeile darf das Fenster nicht verbreitern (lange Meldungen werden abgeschnitten)
+        self.info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.info.setMinimumWidth(120)
+        # Reihe 1: was mit der Auswahl passiert · Reihe 2: Info + Löschen
+        foot = QVBoxLayout()
+        row1 = QHBoxLayout()
+        for b in (self.btn_view, self.btn_mark, self.btn_move):
+            row1.addWidget(b)
+        row1.addStretch(1)
+        row2 = QHBoxLayout()
+        row2.addWidget(self.info, 1)
+        for b in (self.btn_orphans, self.btn_unmark, self.btn_trash):
+            row2.addWidget(b)
+        foot.addLayout(row1)
+        foot.addLayout(row2)
 
-        hint = QLabel(tr("Tasten: Pfeile wählen · Entf / X markieren · Leertaste / Enter / "
-                         "Doppelklick Großansicht · Strg+A alle auswählen · Strg+Entf löschen. "
-                         "Gelöscht wird erst mit „In Papierkorb“ – JPG und RAW zusammen."))
+        hint = QLabel(tr("Tasten: Pfeile wählen · Entf / X markieren · M in Ordner verschieben · "
+                         "Leertaste / Enter / Doppelklick Großansicht · Strg+A alle auswählen · "
+                         "Strg+Entf löschen. Gelöscht wird erst mit „In Papierkorb“ – "
+                         "JPG und RAW zusammen."))
         hint.setWordWrap(True)
         pal = hint.palette()
         pal.setColor(hint.foregroundRole(), pal.color(pal.ColorRole.PlaceholderText))
@@ -219,24 +304,32 @@ class GalleryTab(QWidget):
 
     # ------------------------------------------------------------ Ordnerwahl
 
-    def refresh_folders(self, target_root: Path, select: Path | None = None):
-        """Datumsordner des Hauptordners auflisten, neueste zuerst."""
+    def refresh_folders(self, target_root: Path | None, select: Path | None = None):
+        """Datumsordner des Hauptordners auflisten (neueste zuerst), darunter ihre
+        Themenordner eingerückt."""
+        self._target_root = target_root
         self.folder_combo.blockSignals(True)
         self.folder_combo.clear()
         dirs = []
-        if target_root.is_dir():
+        if target_root and target_root.is_dir():
             dirs = sorted((d for d in target_root.iterdir()
                            if d.is_dir() and d.name[:4].isdigit()),
                           key=lambda d: d.name, reverse=True)
+        if select and select not in dirs and not any(_inside(select, d) for d in dirs):
+            dirs.insert(0, _top_of(select, target_root))
         for d in dirs:
-            self.folder_combo.addItem(d.name, str(d))
+            self._add_with_topics(d, 0)
         if select:
             i = self.folder_combo.findData(str(select))
-            if i < 0:
-                self.folder_combo.insertItem(0, select.name, str(select))
-                i = 0
-            self.folder_combo.setCurrentIndex(i)
+            self.folder_combo.setCurrentIndex(max(i, 0))
         self.folder_combo.blockSignals(False)
+
+    def _add_with_topics(self, folder: Path, depth: int):
+        label = folder.name if depth == 0 else "      " * depth + "└ " + folder.name
+        self.folder_combo.addItem(label, str(folder))
+        if depth < 3:
+            for t in core.topics_in(folder):
+                self._add_with_topics(folder / t, depth + 1)
 
     def _combo_chosen(self, i: int):
         self.load_folder(Path(self.folder_combo.itemData(i)))
@@ -248,8 +341,7 @@ class GalleryTab(QWidget):
             p = Path(d)
             if p.name.lower() in (core.SUB_JPG, core.SUB_RAW):
                 p = p.parent
-            self.folder_combo.insertItem(0, p.name, str(p))
-            self.folder_combo.setCurrentIndex(0)
+            self.refresh_folders(self._target_root, select=p)
             self.load_folder(p)
 
     # ------------------------------------------------------------ Laden
@@ -372,9 +464,11 @@ class GalleryTab(QWidget):
         n_raw = sum(len(r) for j, r in self.pairs if j in self.marked)
         self.info.setText(tr("{n} Bilder · {m} markiert", n=len(self.pairs), m=len(self.marked))
                           + (tr(" (+ {n} RAW)", n=n_raw) if n_raw else ""))
+        self.info.setToolTip("")
         self.btn_trash.setEnabled(bool(self.marked))
         self.btn_mark.setEnabled(bool(self.pairs))
         self.btn_view.setEnabled(bool(self.pairs))
+        self.btn_move.setEnabled(bool(self.pairs))
         self.btn_unmark.setEnabled(bool(self.marked))
         orphans = core.orphan_raws(self.folder) if self.folder else []
         self.btn_orphans.setText(tr("RAW ohne JPG entfernen ({n})", n=len(orphans)))
@@ -412,6 +506,48 @@ class GalleryTab(QWidget):
         self.load_folder(self.folder)
         if self.list.count():
             self.list.setCurrentRow(min(keep_row, self.list.count() - 1))
+
+    def selected_rows(self) -> list[int]:
+        rows = sorted(self.list.row(it) for it in self.list.selectedItems())
+        if not rows and 0 <= self.list.currentRow() < len(self.pairs):
+            rows = [self.list.currentRow()]
+        return rows
+
+    def move_selected(self):
+        """Ausgewählte Bilder (JPG + zugehörige RAWs) in einen Themenordner verschieben."""
+        if not self.folder:
+            return
+        rows = self.selected_rows()
+        if not rows:
+            return
+        pairs = [self.pairs[r] for r in rows]
+        dlg = TopicDialog(self, self.folder, len(pairs), sum(len(r) for _, r in pairs))
+        if dlg.exec() != QDialog.Accepted or not dlg.topic():
+            return
+        res = core.move_to_topic(self.folder, pairs, dlg.topic(),
+                                 with_script=self.s.value("cleanup_script", True, type=bool))
+        if res.errors:
+            QMessageBox.warning(self, tr("Nicht alles verschoben"), "\n".join(res.errors[:20]))
+        # Löschmarkierungen der übrigen Bilder behalten
+        moved = {j for j, _ in pairs}
+        keep_marks = {m for m in self.marked if m not in moved and m.exists()}
+        first = rows[0]
+        self.marked.clear()
+        self.refresh_folders(self._target_root, select=self.folder)
+        self.load_folder(self.folder)
+        self.marked = {j for j, _ in self.pairs if j in keep_marks}
+        for i, (j, _) in enumerate(self.pairs):
+            if j in self.marked:
+                self._repaint_item(i)
+        if self.list.count():
+            self.list.setCurrentRow(min(first, self.list.count() - 1))
+        self.update_footer()
+        if res.moved:
+            msg = tr("✔ {n} Bilder nach „{name}“ verschoben", n=res.moved, name=res.target.name)
+            if res.renamed:
+                msg += tr(" ({n} wegen gleichem Namen umbenannt)", n=res.renamed)
+            self.info.setText(self.info.text() + "   ·   " + msg)
+            self.info.setToolTip(self.info.text())
 
     def has_pending_marks(self) -> bool:
         return bool(self.marked)

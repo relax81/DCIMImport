@@ -493,6 +493,104 @@ def orphan_raws(folder: Path) -> list[Path]:
                   if p.is_file() and kind_of(p) == "raw" and p.stem.upper() not in jpg_stems)
 
 
+# ---------------------------------------------------------------- Themenordner
+
+_RESERVED_TOPICS = {SUB_JPG, SUB_RAW, SUB_VIDEO, "_geloescht"}
+_WIN_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                 *(f"LPT{i}" for i in range(1, 10))}
+
+
+def clean_topic_name(name: str) -> str:
+    """Ordnername fürs Thema bereinigen; "" wenn er nicht zulässig ist."""
+    bad = '<>:"/\\|?*'
+    name = "".join(c for c in name if c not in bad and ord(c) >= 32).strip(" .")
+    if not name or name.lower() in _RESERVED_TOPICS or name.upper().split(".")[0] in _WIN_RESERVED:
+        return ""
+    return name[:120]
+
+
+def topics_in(folder: Path) -> list[str]:
+    """Vorhandene Themenordner direkt in einem Import- oder Themenordner."""
+    try:
+        return sorted((d.name for d in folder.iterdir()
+                       if d.is_dir() and d.name.lower() not in _RESERVED_TOPICS
+                       and not d.name.startswith(".")), key=str.upper)
+    except OSError:
+        return []
+
+
+@dataclass
+class MoveResult:
+    moved: int = 0               # verschobene Bilder (JPG mit ihren RAWs)
+    files: int = 0               # verschobene Dateien insgesamt
+    renamed: int = 0             # wegen Namensgleichheit umbenannt (_1, _2 …)
+    errors: list[str] = field(default_factory=list)
+    target: Path | None = None
+
+
+def _dest_for(src: Path, folder: Path, topic_dir: Path) -> Path:
+    """jpg/x.JPG -> Thema/jpg/x.JPG, flach liegende Dateien -> Thema/x.JPG."""
+    rel = src.parent.relative_to(folder)
+    return topic_dir / rel / src.name
+
+
+def _free_stem(dests: list[Path], taken: set[str]) -> str:
+    """Gemeinsamer Dateiname (ohne Endung) für JPG + RAWs, der im Ziel noch frei ist,
+    damit das Paar auch nach dem Umbenennen zusammengehört."""
+    stem = dests[0].stem
+    cand, n = stem, 0
+    while True:
+        paths = [d.with_name(cand + d.suffix) for d in dests]
+        if not any(p.exists() or str(p).upper() in taken for p in paths):
+            return cand
+        n += 1
+        cand = f"{stem}_{n}"
+
+
+def move_to_topic(folder: Path, pairs: list[tuple[Path, list[Path]]], topic: str,
+                  with_script: bool = True) -> MoveResult:
+    """Verschiebt JPGs samt zugehörigen RAWs in den Themenordner `folder/topic`.
+
+    Struktur bleibt erhalten (jpg/ und raw/ bzw. flach). Gleichnamige Dateien im Ziel
+    werden nie überschrieben: das Paar bekommt gemeinsam _1, _2 … Scheitert eine Datei
+    eines Paares, werden die schon verschobenen Dateien dieses Paares zurückgeschoben."""
+    res = MoveResult()
+    name = clean_topic_name(topic)
+    if not name:
+        res.errors.append(tr("Ungültiger Ordnername: „{name}“", name=topic))
+        return res
+    topic_dir = folder / name
+    res.target = topic_dir
+    taken: set[str] = set()
+    for jpg, raws in pairs:
+        files = [jpg, *raws]
+        dests = [_dest_for(f, folder, topic_dir) for f in files]
+        stem = _free_stem(dests, taken)
+        if stem != dests[0].stem:
+            res.renamed += 1
+        dests = [d.with_name(stem + d.suffix) for d in dests]
+        done: list[tuple[Path, Path]] = []
+        try:
+            for src, dst in zip(files, dests):
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dst))
+                done.append((src, dst))
+        except Exception as e:
+            res.errors.append(f"{jpg.name}: {e}")
+            for src, dst in reversed(done):  # Paar nicht auseinanderreißen
+                try:
+                    shutil.move(str(dst), str(src))
+                except Exception as e2:
+                    res.errors.append(f"{dst}: {e2}")
+            continue
+        taken.update(str(d).upper() for d in dests)
+        res.moved += 1
+        res.files += len(files)
+    if with_script and res.moved:
+        write_cleanup_script(topic_dir)  # räumt nur diesen Themenordner auf
+    return res
+
+
 def to_trash(paths: Iterable[Path]) -> list[str]:
     from send2trash import send2trash
     errors = []

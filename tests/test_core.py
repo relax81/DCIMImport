@@ -187,3 +187,84 @@ def test_cleanup_script_english(tmp_path):
         assert i18n.tr("{n} Bilder · {m} markiert", n=3, m=1) == "3 images · 1 marked"
     finally:
         i18n.set_language("de")
+
+
+# ---------------------------------------------------------------- Themenordner
+
+def _import_folder(tmp_path, names=("A", "B", "C"), raw_ext=".ORF"):
+    f = tmp_path / "2026-11-16"
+    (f / "jpg").mkdir(parents=True)
+    (f / "raw").mkdir()
+    for n in names:
+        (f / "jpg" / f"{n}.JPG").write_bytes(b"j" + n.encode())
+        (f / "raw" / f"{n}{raw_ext}").write_bytes(b"r" + n.encode())
+    return f
+
+
+def test_move_to_topic_moves_jpg_and_raw(tmp_path):
+    f = _import_folder(tmp_path)
+    pairs = [p for p in core.pairs_in(f) if p[0].stem in ("A", "C")]
+    res = core.move_to_topic(f, pairs, "  Strand  ")
+    assert res.moved == 2 and res.files == 4 and not res.errors
+    t = f / "Strand"
+    assert sorted(p.name for p in (t / "jpg").iterdir()) == ["A.JPG", "C.JPG"]
+    assert sorted(p.name for p in (t / "raw").iterdir()) == ["A.ORF", "C.ORF"]
+    assert [j.name for j, _ in core.pairs_in(f)] == ["B.JPG"]           # Rest bleibt
+    assert core.orphan_raws(f) == [] and core.orphan_raws(t) == []      # keine Waisen
+    assert (t / core.cleanup_name()).exists()                            # eigenes Script
+    assert core.topics_in(f) == ["Strand"]
+    # Themenordner funktioniert wie ein Importordner
+    assert [(j.name, [r.name for r in rs]) for j, rs in core.pairs_in(t)] == [
+        ("A.JPG", ["A.ORF"]), ("C.JPG", ["C.ORF"])]
+
+
+def test_move_to_topic_name_clash_keeps_pairs_together(tmp_path):
+    f = _import_folder(tmp_path)
+    core.move_to_topic(f, [p for p in core.pairs_in(f) if p[0].stem == "A"], "Strand")
+    # neues A im Ursprungsordner (z. B. zweiter Import), wieder nach "Strand"
+    (f / "jpg" / "A.JPG").write_bytes(b"neu")
+    (f / "raw" / "A.ORF").write_bytes(b"neu")
+    res = core.move_to_topic(f, [p for p in core.pairs_in(f) if p[0].stem == "A"], "Strand")
+    assert res.moved == 1 and res.renamed == 1
+    t = f / "Strand"
+    assert (t / "jpg" / "A.JPG").read_bytes() == b"jA"                   # nichts überschrieben
+    assert (t / "jpg" / "A_1.JPG").read_bytes() == b"neu"
+    assert (t / "raw" / "A_1.ORF").read_bytes() == b"neu"               # RAW passt zum JPG
+    assert core.orphan_raws(t) == []
+
+
+def test_move_to_topic_flat_folder_and_multiple_raws(tmp_path):
+    f = tmp_path / "alt"
+    f.mkdir()
+    (f / "X.JPG").write_bytes(b"j")
+    (f / "X.ORF").write_bytes(b"r")
+    (f / "X.DNG").write_bytes(b"d")
+    (f / "Y.JPG").write_bytes(b"j")
+    res = core.move_to_topic(f, [p for p in core.pairs_in(f) if p[0].stem == "X"], "Thema")
+    assert res.files == 3
+    assert sorted(p.name for p in (f / "Thema").iterdir()
+                  if p.suffix != ".bat") == ["X.DNG", "X.JPG", "X.ORF"]
+    assert sorted(p.name for p in f.iterdir() if p.is_file()) == ["Y.JPG"]
+
+
+def test_move_to_topic_rolls_back_pair_on_error(tmp_path, monkeypatch):
+    f = _import_folder(tmp_path, names=("A",))
+    real_move = core.shutil.move
+
+    def flaky(src, dst):
+        if src.endswith(".ORF"):
+            raise OSError("Datei gesperrt")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(core.shutil, "move", flaky)
+    res = core.move_to_topic(f, core.pairs_in(f), "Strand")
+    assert res.moved == 0 and res.errors
+    assert (f / "jpg" / "A.JPG").exists() and (f / "raw" / "A.ORF").exists()  # zurück
+
+
+def test_clean_topic_name():
+    assert core.clean_topic_name(' Strand: "Tag 1" ') == "Strand Tag 1"
+    for bad in ("", "  ", "...", "jpg", "RAW", "video", "con", "COM1.txt"):
+        assert core.clean_topic_name(bad) == ""
+    f_res = core.move_to_topic(Path("."), [], "jpg")
+    assert f_res.errors and f_res.moved == 0

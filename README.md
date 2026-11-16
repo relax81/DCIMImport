@@ -57,10 +57,28 @@ Already imported files can be skipped with a checkbox.
 | Arrow keys | select image |
 | `Del` / `X` | mark / unmark |
 | `Space` / `Enter` / double-click | large view (`← →` browse, `F` full screen, `Esc` back) |
+| `M` | move the selected images (JPG + RAW) into a topic subfolder |
 | `Ctrl+A` | select all |
 | `Ctrl+Del` | move marked to the Recycle Bin (JPG + matching RAW) |
 
 **Remove RAW without JPG** cleans up folders where JPGs were already deleted elsewhere.
+
+### Topic folders
+
+Select images and press `M` (or *Move to folder …*), then type a new name or pick an existing
+one. The JPGs and their matching RAWs are moved together into a subfolder of the import folder,
+which again has its own `jpg` / `raw` folders and clean-up script:
+
+```
+2026-11-16 Holiday\
+├─ jpg\  raw\
+└─ Beach\
+   ├─ jpg\  raw\
+   └─ delete_RAW_without_JPG.bat
+```
+
+Topic folders appear indented in the folder list and can be reviewed like any import folder.
+Files are never overwritten: on a name clash the JPG and its RAW get the same `_1` suffix.
 
 ### Clean-up script
 
